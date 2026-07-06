@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
     if (upto === null) return res.status(200).json({ ok: true, skipped: 'review already running' });
 
     const rows = await L.sb('GET', 'majlis_messages?room_id=eq.' + roomId + '&id=gt.' + upto +
-      '&kind=eq.scholar&order=id.asc&limit=10&select=id,speaker,text');
+      '&kind=eq.scholar&deleted=eq.false&order=id.asc&limit=10&select=id,speaker,text');
     if (rows.length < 4) return res.status(200).json({ ok: true, skipped: 'not enough new messages' });
 
     const batch = rows.map(m => '[msg ' + m.id + '] ' + m.speaker + ': ' + m.text).join('\n\n');

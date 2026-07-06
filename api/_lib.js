@@ -163,6 +163,11 @@ async function getUser(req) {
   return { email: u.email, name: (u.user_metadata && u.user_metadata.name) || String(u.email || '').split('@')[0] };
 }
 
+// ---- admins: ADMIN_EMAILS env (comma-separated), defaulting to the project owner ----
+const ADMINS = new Set(String(process.env.ADMIN_EMAILS || 'maajidshafibhat@gmail.com')
+  .split(',').map(e => e.trim().toLowerCase()).filter(Boolean));
+function isAdmin(user) { return !!user && ADMINS.has(String(user.email || '').toLowerCase()); }
+
 // ---- writes go straight to Postgres with a private connection string (RLS locks
 // the public anon key to read-only; the postgres role is the table owner and bypasses it)
 const { Pool } = require('pg');
@@ -209,8 +214,20 @@ async function addFlag(roomId, messageId, speaker, reviewer, problem, reason) {
   await db().query('insert into majlis_flags (room_id, message_id, speaker, reviewer, problem, reason) values ($1,$2,$3,$4,$5,$6)',
     [roomId, messageId, speaker, reviewer, problem, reason]);
 }
+// admin moderation: soft-delete a message (reversible, keeps the audit trail);
+// hard-delete a room and everything in it (that's what "delete this thread" means)
+async function deleteMessage(id) {
+  const r = await db().query('update majlis_messages set deleted = true where id = $1 returning id', [id]);
+  return r.rows.length > 0;
+}
+async function deleteRoom(id) {
+  await db().query('delete from majlis_flags where room_id = $1', [id]);
+  await db().query('delete from majlis_messages where room_id = $1', [id]);
+  const r = await db().query('delete from majlis_rooms where id = $1 returning id', [id]);
+  return r.rows.length > 0;
+}
 async function roomMessages(roomId, limit) {
-  return sb('GET', 'majlis_messages?room_id=eq.' + roomId + '&order=id.desc&limit=' + (limit || 30)).then(r => r.reverse());
+  return sb('GET', 'majlis_messages?room_id=eq.' + roomId + '&deleted=eq.false&order=id.desc&limit=' + (limit || 30)).then(r => r.reverse());
 }
 function transcriptOf(rows) {
   return rows.filter(m => m.kind !== 'system')
@@ -367,6 +384,7 @@ const cors = res => {
 };
 
 module.exports = { MODERATOR, SCHOLARS, GUESTS, ALL, byName, ADAB, memberSys,
-  sb, getUser, addMsg, createRoom, claimRoom, touchRoom, saveSummary,
+  sb, getUser, isAdmin, addMsg, createRoom, claimRoom, touchRoom, saveSummary,
   REVIEWERS, MUHTASIB, CHIEF, guardBlocks, claimReview, saveReviewed, addFlag,
+  deleteMessage, deleteRoom,
   roomMessages, transcriptOf, verseBlock, llm, fetchVerse, parseMentions, cors, KEYS };

@@ -50,6 +50,12 @@
   .msg.verse .tr { font-size: 13.5px; opacity: .75; margin-top: 8px; }
   .msg.mod .body { background: #FBF3DC; border-color: #E4CD8B; }
   .msg.mod .head::before { content: '🛡️ '; }
+  .msg { position: relative; }
+  .delmsg { display: none; position: absolute; top: 0; right: 0; background: none; border: none; color: #B0483A; font-size: 12px; padding: 4px 8px; cursor: pointer; opacity: .6; }
+  .msg:hover .delmsg { display: block; }
+  .delmsg:hover { opacity: 1; }
+  .roomcard .delroom { background: none; border: none; color: #B0483A; font-size: 16px; padding: 2px 8px; cursor: pointer; opacity: .5; }
+  .roomcard .delroom:hover { opacity: 1; }
   #thinking { display: none; font-size: 12.5px; opacity: .55; padding: 4px 18px; font-style: italic; }
   footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 18px; }
   footer .wrap { display: flex; gap: 8px; padding: 0; max-width: 824px; }
@@ -185,11 +191,23 @@ function drawCats() {
     '" onclick="setCat(\'' + k + '\')">' + c.label + '</button>').join('');
 }
 function setCat(k) { category = k; $('topicInput').placeholder = CATS[k].ph; drawCats(); }
-function onAuthed() {
+async function delRoom(id) {
+  if (await adminAction('delete_room', id, 'Permanently delete this entire majlis and all its messages?')) showLobby();
+}
+let isAdmin = false;
+async function onAuthed() {
   $('auth').style.display = 'none';
   $('whoami').textContent = displayName();
   $('signout').style.display = '';
+  try { isAdmin = (await api('whoami')).isAdmin; } catch { isAdmin = false; }
   showLobby();
+}
+async function adminAction(action, id, confirmMsg) {
+  if (!isAdmin) return;
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  const d = await api('admin', { method: 'POST', body: JSON.stringify({ action, id }) }).catch(e => ({ error: e.message }));
+  if (d && d.error) alert(d.error);
+  return d && d.ok;
 }
 function leaveRealtime() { if (rtChannel && sbRT) { sbRT.removeChannel(rtChannel); rtChannel = null; } }
 async function showLobby() {
@@ -200,9 +218,11 @@ async function showLobby() {
   const d = await api('rooms');
   membersCache = d.members || membersCache;
   $('rooms').innerHTML = (d.rooms || []).map(r =>
-    '<div class="roomcard" onclick="enterRoom(' + r.id + ',this.dataset.t)" data-t="' + esc(r.topic) + '">' +
+    '<div class="roomcard"><div style="flex:1;cursor:pointer" onclick="enterRoom(' + r.id + ',this.dataset.t)" data-t="' + esc(r.topic) + '">' +
     '<div>' + (CATS[r.category] ? CATS[r.category].label.split(' ')[0] + ' ' : '') + esc(r.topic) +
-    '</div><div class="meta">by ' + esc(r.created_by || '?') + ' · ' + new Date(r.at).toLocaleString() + '</div></div>').join('')
+    '</div><div class="meta">by ' + esc(r.created_by || '?') + ' · ' + new Date(r.at).toLocaleString() + '</div></div>' +
+    (isAdmin ? '<button class="delroom" title="Delete this majlis" onclick="event.stopPropagation(); delRoom(' + r.id + ')">🗑️</button>' : '') +
+    '</div>').join('')
     || '<p style="opacity:.5">No circles yet — convene the first one.</p>';
 }
 async function createRoom() {
@@ -248,6 +268,9 @@ function addMessage(m) {
   if (stick) box.scrollTop = box.scrollHeight;
 }
 function mention(name) { $('sayInput').value = ('@' + name + ' ' + $('sayInput').value).trimEnd() + ' '; $('sayInput').focus(); }
+async function delMsg(id, btn) {
+  if (await adminAction('delete_message', id, 'Delete this message?')) btn.closest('.msg').remove();
+}
 function render(m) {
   const div = document.createElement('div');
   if (m.kind === 'system') { div.className = 'msg system'; div.innerHTML = '<div class="body">' + esc(m.text) + '</div>'; }
@@ -259,7 +282,8 @@ function render(m) {
     div.className = 'msg' + (m.kind === 'human' ? ' human' : '') + (m.kind === 'mod' ? ' mod' : '');
     div.innerHTML = '<div class="head" style="color:' + (m.color || (m.kind === 'human' ? '#0F6B54' : '#555')) + '">' + esc(m.speaker) +
       (m.role && m.role !== m.speaker && m.role !== 'human' ? ' <span class="role">· ' + esc(m.role) + '</span>' : '') +
-      '</div><div class="body">' + fmt(m.text) + '</div>';
+      '</div><div class="body">' + fmt(m.text) + '</div>' +
+      (isAdmin && m.id ? '<button class="delmsg" title="Delete this message" onclick="delMsg(' + m.id + ', this)">🗑️</button>' : '');
   }
   $('feed').appendChild(div);
 }

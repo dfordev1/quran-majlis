@@ -31,7 +31,7 @@ module.exports = async (req, res) => {
       }
     } else if (text) {
       // hisbah gate: duplicate-spam check, then Llama-Guard safety screen
-      const [last] = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&kind=eq.human&speaker=eq.' + encodeURIComponent(user.name) + '&order=id.desc&limit=1&select=text,at');
+      const [last] = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&kind=eq.human&deleted=eq.false&speaker=eq.' + encodeURIComponent(user.name) + '&order=id.desc&limit=1&select=text,at');
       if (last && last.text === text && Date.now() - new Date(last.at).getTime() < 120000)
         return res.status(400).json({ error: 'You just said exactly that — the circle heard you the first time.' });
       if (await L.guardBlocks(text))
@@ -43,7 +43,7 @@ module.exports = async (req, res) => {
     // Running summary: every ~15 scholar messages, the moderator condenses the sitting
     // so far into room.summary — every later speaker sees the WHOLE sitting cheaply.
     try {
-      const newRows = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&id=gt.' + (room.summary_upto || 0) + '&kind=eq.scholar&order=id.asc&limit=40&select=id,speaker,role,text');
+      const newRows = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&id=gt.' + (room.summary_upto || 0) + '&kind=eq.scholar&deleted=eq.false&order=id.asc&limit=40&select=id,speaker,role,text');
       if (newRows.length >= 15) {
         const upd = await L.llm(L.MODERATOR.model,
           'You maintain the running minutes of a Quranic study circle. Merge the existing summary with the new contributions into ONE updated summary (max 250 words): key points made and by whom, agreements, respectful differences, open questions. Plain prose, no headings.',
