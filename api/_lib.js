@@ -270,6 +270,26 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // text contains this planning voice, keep only what follows the LAST plausible
 // "final draft" marker, or the last paragraph if no marker is found.
 const LEAK_RX = /\b(we need to (respond|answer|write)|let'?s (draft|count|craft)|word count|now count|draft:|final draft|as an? ai( language)? model)\b/i;
+
+// A different leak shape: some models, when told to stay under a word limit,
+// narrate a live word count by numbering every token instead of writing prose
+// ("1 Shaykh\n2 Idris:\n3 Ustadh..."). Perfectly reconstructable: strip the
+// leading number from each line and rejoin — that reproduces the intended sentence.
+function reconstructNumberedDump(text) {
+  const lines = text.split('\n');
+  let i = 0, lastNum = 0, matched = 0;
+  const words = [];
+  for (; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) { if (matched > 0) break; else continue; }
+    const m = trimmed.match(/^(\d+)\s+(.+)$/);
+    if (m && parseInt(m[1], 10) > lastNum) { lastNum = parseInt(m[1], 10); words.push(m[2]); matched++; }
+    else break;
+  }
+  if (matched < 10) return null; // not this pattern (or a coincidental short list — leave alone)
+  const rest = lines.slice(i).join('\n').trim();
+  return (words.join(' ') + (rest ? '\n\n' + rest : '')).trim();
+}
 function delintReply(text) {
   if (!LEAK_RX.test(text)) return text;
   const markers = [...text.matchAll(/\n(?:final(?: draft| version| answer)?|draft \d*)\s*:?\s*\n/gi)];
@@ -289,7 +309,7 @@ async function llm(model, system, messages, json) {
     if (!key) return null;
     try {
       const text = await nvChat(model, system, messages, key);
-      if (!json) return delintReply(text);
+      if (!json) return delintReply(reconstructNumberedDump(text) || text);
       const m = text.match(/\{[\s\S]*\}/);
       if (!m) return null;
       try { return JSON.parse(m[0]); } catch { return null; }
