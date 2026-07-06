@@ -182,7 +182,7 @@ async function createRoom(topic, verse, createdBy, category) {
   const r = await db().query(
     'insert into majlis_rooms (topic, verse, created_by, category) values ($1,$2,$3,$4) returning *',
     [topic, verse ? JSON.stringify(verse) : null, createdBy, category]);
-  return r.rows[0];
+  return { ...r.rows[0], id: Number(r.rows[0].id) }; // pg returns bigint as string
 }
 async function claimRoom(roomId, ms) { // atomic: exactly one heartbeat wins the round
   const r = await db().query(
