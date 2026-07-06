@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quran Majlis — online study circle</title>
+<style>
+  :root { --cream:#FAF6EE; --ink:#2A2620; --green:#0F6B54; --gold:#B8863B; --card:#FFFFFF; --line:#E8E0D0; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--cream); color: var(--ink); font: 15px/1.55 'Segoe UI', system-ui, sans-serif; height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  header { background: var(--green); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; font-weight: 600; cursor: pointer; }
+  header .status { font-size: 12px; opacity: .85; margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  header button { background: rgba(255,255,255,.15); color: #fff; border: none; border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .screen { flex: 1; overflow-y: auto; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 18px; }
+  /* auth */
+  #auth { display: flex; align-items: center; justify-content: center; }
+  #auth .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px; width: 340px; }
+  #auth h2 { margin-bottom: 4px; } #auth p { font-size: 13px; opacity: .6; margin-bottom: 16px; }
+  #auth input { width: 100%; margin-bottom: 10px; }
+  #auth .err { color: #B0483A; font-size: 12.5px; min-height: 18px; margin-bottom: 6px; }
+  /* lobby */
+  #lobby { padding: 26px 0; }
+  #lobby h2 { margin-bottom: 12px; }
+  .roomcard { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+  .roomcard:hover { border-color: var(--green); }
+  .roomcard .meta { font-size: 12px; opacity: .55; white-space: nowrap; }
+  .newrow { display: flex; gap: 8px; margin: 14px 0 26px; }
+  /* room */
+  #room { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  #members { display: flex; gap: 8px; padding: 8px 18px; background: #F2EBDD; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .member { font-size: 11.5px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; white-space: nowrap; cursor: pointer; }
+  .member span { opacity: .55; }
+  #feedbox { flex: 1; overflow-y: auto; padding: 16px 0 24px; }
+  .msg { margin: 14px 0; }
+  .msg .head { font-size: 12.5px; font-weight: 600; margin-bottom: 3px; }
+  .msg .head .role { font-weight: 400; opacity: .55; }
+  .msg .body { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; }
+  .msg.human .body { background: #EAF3EF; border-color: #CBE0D6; }
+  .msg.system { text-align: center; }
+  .msg.system .body { display: inline-block; background: none; border: none; font-size: 12.5px; opacity: .6; padding: 2px; }
+  .msg.verse .body { background: #FDF9EF; border-color: #EAD9B6; text-align: center; }
+  .msg.verse .arabic { font-family: 'Amiri', 'Scheherazade New', 'Traditional Arabic', serif; font-size: 26px; line-height: 2; direction: rtl; color: #4A3B18; }
+  .msg.verse .tr { font-size: 13.5px; opacity: .75; margin-top: 8px; }
+  #thinking { display: none; font-size: 12.5px; opacity: .55; padding: 4px 18px; font-style: italic; }
+  footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 18px; }
+  footer .wrap { display: flex; gap: 8px; padding: 0; max-width: 824px; }
+  input { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font: inherit; background: var(--cream); outline: none; }
+  input:focus { border-color: var(--green); }
+  footer input { flex: 1; }
+  button { border: none; border-radius: 10px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; background: var(--green); color: #fff; }
+  button.alt { background: #EFE7D6; color: var(--ink); font-weight: 500; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { font-size: 11.5px; opacity: .5; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 onclick="showLobby()">🕌 Quran Majlis</h1>
+  <div id="topicline" style="font-size:13px;opacity:.9"></div>
+  <div class="status"><span id="whoami"></span><button id="signout" style="display:none" onclick="signOut()">Sign out</button></div>
+</header>
+
+<div id="auth" class="screen">
+  <div class="card">
+    <h2>As-salamu alaykum</h2>
+    <p>Sign in to join the study circles.</p>
+    <input id="authName" placeholder="Display name (for sign up)">
+    <input id="authEmail" type="email" placeholder="Email">
+    <input id="authPass" type="password" placeholder="Password (6+ chars)">
+    <div class="err" id="authErr"></div>
+    <div style="display:flex;gap:8px">
+      <button style="flex:1" onclick="signIn()">Sign in</button>
+      <button style="flex:1" class="alt" onclick="signUp()">Sign up</button>
+    </div>
+  </div>
+</div>
+
+<div id="lobby" class="screen" style="display:none">
+  <div class="wrap">
+    <h2>Open a new majlis</h2>
+    <div class="newrow">
+      <input id="topicInput" style="flex:1" placeholder="e.g.  2:255 — what makes Ayat al-Kursi so special?">
+      <button id="openBtn" onclick="createRoom()">Convene</button>
+    </div>
+    <h2>Ongoing circles — join any</h2>
+    <div id="rooms"></div>
+  </div>
+</div>
+
+<div id="room" class="screen">
+  <div id="members"></div>
+  <div id="feedbox"><div class="wrap" id="feed"></div></div>
+  <div id="thinking">the circle is reflecting…</div>
+  <footer>
+    <div class="wrap">
+      <input id="sayInput" placeholder="Speak… use @Name, @guests, @core or @all to address members directly" onkeydown="if(event.key==='Enter')sayIt()">
+      <button onclick="sayIt()">Say</button>
+      <button class="alt" onclick="continueRound()">Continue ↻</button>
+      <button class="alt" onclick="fullCircle()" title="Every member who hasn't spoken contributes once">Full circle ◎</button>
+    </div>
+    <div class="hint wrap">Tip: click a member chip above to @mention them.</div>
+  </footer>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ssknrqfaludyprjncdbx.supabase.co';
+const ANON = 'sb_publishable_NjBb7sd4_5ef5EtEiMNZnA__nmf_aoa';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let session = null, roomId = null, since = 0, pollTimer = null, working = false;
+
+// ---------- auth (Supabase REST, no SDK needed) ----------
+async function authFetch(path, body) {
+  const r = await fetch(SUPABASE_URL + '/auth/v1/' + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: ANON }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error_description || d.msg || d.error || 'auth failed');
+  return d;
+}
+function saveSession(s) { session = s; localStorage.setItem('majlis_session', JSON.stringify(s)); onAuthed(); }
+async function signUp() {
+  try {
+    $('authErr').textContent = '';
+    const d = await authFetch('signup', { email: $('authEmail').value.trim(), password: $('authPass').value,
+      data: { name: $('authName').value.trim() || $('authEmail').value.split('@')[0] } });
+    if (d.access_token) return saveSession(d);
+    $('authErr').textContent = 'Check your email to confirm, then sign in.';
+  } catch (e) { $('authErr').textContent = e.message; }
+}
+async function signIn() {
+  try {
+    $('authErr').textContent = '';
+    saveSession(await authFetch('token?grant_type=password', { email: $('authEmail').value.trim(), password: $('authPass').value }));
+  } catch (e) { $('authErr').textContent = e.message; }
+}
+async function refreshToken() {
+  try { saveSession(await authFetch('token?grant_type=refresh_token', { refresh_token: session.refresh_token })); }
+  catch { signOut(); }
+}
+function signOut() { localStorage.removeItem('majlis_session'); location.reload(); }
+function displayName() { return (session.user && session.user.user_metadata && session.user.user_metadata.name) || session.user.email.split('@')[0]; }
+
+// ---------- api ----------
+async function api(path, opts = {}) {
+  const r = await fetch('/api/' + path, { ...opts,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, ...(opts.headers || {}) } });
+  if (r.status === 401) { await refreshToken(); return api(path, opts); }
+  return r.json();
+}
+
+// ---------- lobby ----------
+let membersCache = [];
+function onAuthed() {
+  $('auth').style.display = 'none';
+  $('whoami').textContent = displayName();
+  $('signout').style.display = '';
+  showLobby();
+}
+async function showLobby() {
+  clearInterval(pollTimer); roomId = null;
+  $('room').style.display = 'none'; $('topicline').textContent = '';
+  $('lobby').style.display = 'block';
+  const d = await api('rooms');
+  membersCache = d.members || membersCache;
+  $('rooms').innerHTML = (d.rooms || []).map(r =>
+    '<div class="roomcard" onclick="enterRoom(' + r.id + ',this.dataset.t)" data-t="' + esc(r.topic) + '">' +
+    '<div>' + esc(r.topic) + '</div><div class="meta">by ' + esc(r.created_by || '?') + ' · ' + new Date(r.at).toLocaleString() + '</div></div>').join('')
+    || '<p style="opacity:.5">No circles yet — convene the first one.</p>';
+}
+async function createRoom() {
+  const topic = $('topicInput').value.trim();
+  if (!topic) return;
+  $('openBtn').disabled = true;
+  const d = await api('rooms', { method: 'POST', body: JSON.stringify({ topic }) });
+  $('openBtn').disabled = false;
+  if (d.room) { enterRoom(d.room.id, topic); runQueueFromSay(''); } // open with a first round
+  else alert(d.error || 'failed');
+}
+
+// ---------- room ----------
+function enterRoom(id, topic) {
+  roomId = id; since = 0;
+  $('lobby').style.display = 'none';
+  $('room').style.display = 'flex';
+  $('feed').innerHTML = '';
+  $('topicline').textContent = topic || '';
+  $('members').innerHTML = membersCache.map(m =>
+    '<div class="member" style="border-left:3px solid ' + m.color + '" onclick="mention(\'' + m.name.replace(/'/g, "\\'") + '\')"><b>' +
+    esc(m.name) + '</b> <span>' + esc(m.role === 'Guest' ? m.model : m.role) + '</span></div>').join('');
+  poll(); pollTimer = setInterval(poll, 2000);
+}
+function mention(name) { $('sayInput').value = ('@' + name + ' ' + $('sayInput').value).trimEnd() + ' '; $('sayInput').focus(); }
+function render(m) {
+  const div = document.createElement('div');
+  if (m.kind === 'system') { div.className = 'msg system'; div.innerHTML = '<div class="body">' + esc(m.text) + '</div>'; }
+  else if (m.kind === 'verse') {
+    const [ar, tr] = m.text.split('\n\n');
+    div.className = 'msg verse';
+    div.innerHTML = '<div class="body"><div class="arabic">' + esc(ar) + '</div><div class="tr">' + esc(tr || '') + '</div></div>';
+  } else {
+    div.className = 'msg' + (m.kind === 'human' ? ' human' : '');
+    div.innerHTML = '<div class="head" style="color:' + (m.color || (m.kind === 'human' ? '#0F6B54' : '#555')) + '">' + esc(m.speaker) +
+      (m.role && m.role !== m.speaker && m.role !== 'human' ? ' <span class="role">· ' + esc(m.role) + '</span>' : '') +
+      '</div><div class="body">' + esc(m.text) + '</div>';
+  }
+  $('feed').appendChild(div);
+}
+async function poll() {
+  if (!roomId) return;
+  try {
+    const d = await api('messages?room_id=' + roomId + '&since=' + since);
+    const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
+    for (const m of (d.messages || [])) { render(m); since = m.id; }
+    if ((d.messages || []).length && stick) box.scrollTop = box.scrollHeight;
+  } catch {}
+}
+
+// ---------- discussion driving (client walks the queue, one /api/speak per member) ----------
+async function runQueue(queue) {
+  working = true; $('thinking').style.display = 'block';
+  try {
+    for (let i = 0; i < queue.length; i += 3) // 3 members in parallel per wave
+      await Promise.all(queue.slice(i, i + 3).map(n =>
+        api('speak', { method: 'POST', body: JSON.stringify({ room_id: roomId, name: n }) }).catch(() => {})));
+    await poll();
+  } finally { working = false; $('thinking').style.display = 'none'; }
+}
+async function runQueueFromSay(text, mode) {
+  const d = await api('say', { method: 'POST', body: JSON.stringify({ room_id: roomId, text, mode }) });
+  if (d.queue) await runQueue(d.queue);
+  else if (d.error) alert(d.error);
+}
+function sayIt() {
+  if (working) return;
+  const t = $('sayInput').value.trim();
+  if (!t) return;
+  $('sayInput').value = '';
+  runQueueFromSay(t);
+}
+function continueRound() { if (!working) runQueueFromSay(''); }
+function fullCircle() { if (!working && confirm('Every member who has not yet spoken will contribute once. This takes a few minutes. Proceed?')) runQueueFromSay('', 'roundtable'); }
+
+// ---------- boot ----------
+try { session = JSON.parse(localStorage.getItem('majlis_session')); } catch {}
+if (session && session.access_token) { refreshToken(); } else $('auth').style.display = 'flex';
+</script>
+</body>
+</html>
