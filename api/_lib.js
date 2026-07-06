@@ -386,5 +386,5 @@ const cors = res => {
 module.exports = { MODERATOR, SCHOLARS, GUESTS, ALL, byName, ADAB, memberSys,
   sb, getUser, isAdmin, addMsg, createRoom, claimRoom, touchRoom, saveSummary,
   REVIEWERS, MUHTASIB, CHIEF, guardBlocks, claimReview, saveReviewed, addFlag,
-  deleteMessage, deleteRoom,
+  deleteMessage, deleteRoom, db,
   roomMessages, transcriptOf, verseBlock, llm, fetchVerse, parseMentions, cors, KEYS };

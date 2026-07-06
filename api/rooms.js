@@ -6,8 +6,18 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   try {
     if (req.method === 'GET') {
-      const rooms = await L.sb('GET', 'majlis_rooms?select=id,at,topic,created_by,open,category&order=id.desc&limit=50');
-      return res.status(200).json({ rooms, members: L.ALL.map(a => ({ name: a.name, role: a.role, model: a.model.split('/')[1], color: a.color })) });
+      // "active" = a message landed in the last 10 minutes — a single indexed query,
+      // not N+1: one lateral join per room, same cost as the old plain select.
+      const rows = await L.db().query(
+        `select r.id, r.at, r.topic, r.created_by, r.open, r.category,
+                (m.last_at is not null and m.last_at > now() - interval '10 minutes') as active
+         from majlis_rooms r
+         left join lateral (select max(at) as last_at from majlis_messages where room_id = r.id) m on true
+         order by r.id desc limit 50`);
+      const rooms = rows.rows.map(r => ({ ...r, id: Number(r.id) }));
+      // members rarely change — the client caches them, so skip resending unless asked (meta=1)
+      const members = req.query.meta === '0' ? undefined : L.ALL.map(a => ({ name: a.name, role: a.role, model: a.model.split('/')[1], color: a.color }));
+      return res.status(200).json({ rooms, members });
     }
     if (req.method === 'POST') {
       const user = await L.getUser(req);
