@@ -109,7 +109,8 @@ const SUPABASE_URL = 'https://ssknrqfaludyprjncdbx.supabase.co';
 const ANON = 'sb_publishable_NjBb7sd4_5ef5EtEiMNZnA__nmf_aoa';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-let session = null, roomId = null, since = 0, pollTimer = null, working = false;
+let session = null, roomId = null, since = 0, pollTimer = null, working = false, polling = false;
+const seen = new Set(); // rendered message ids — dedupes overlapping polls
 
 // ---------- auth (Supabase REST, no SDK needed) ----------
 async function authFetch(path, body) {
@@ -181,7 +182,8 @@ async function createRoom() {
 
 // ---------- room ----------
 function enterRoom(id, topic) {
-  roomId = id; since = 0;
+  clearInterval(pollTimer);
+  roomId = id; since = 0; seen.clear();
   $('lobby').style.display = 'none';
   $('room').style.display = 'flex';
   $('feed').innerHTML = '';
@@ -208,13 +210,22 @@ function render(m) {
   $('feed').appendChild(div);
 }
 async function poll() {
-  if (!roomId) return;
+  if (!roomId || polling) return;
+  polling = true;
+  const room = roomId;
   try {
-    const d = await api('messages?room_id=' + roomId + '&since=' + since);
+    const d = await api('messages?room_id=' + room + '&since=' + since);
+    if (room !== roomId) return; // user left the room while this request was in flight
     const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
-    for (const m of (d.messages || [])) { render(m); since = m.id; }
-    if ((d.messages || []).length && stick) box.scrollTop = box.scrollHeight;
+    let added = false;
+    for (const m of (d.messages || [])) {
+      since = Math.max(since, m.id);
+      if (seen.has(m.id)) continue;
+      seen.add(m.id); render(m); added = true;
+    }
+    if (added && stick) box.scrollTop = box.scrollHeight;
   } catch {}
+  finally { polling = false; }
 }
 
 // ---------- discussion driving (client walks the queue, one /api/speak per member) ----------
