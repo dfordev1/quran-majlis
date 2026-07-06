@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quran Majlis — online study circle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root { --cream:#FAF6EE; --ink:#2A2620; --green:#0F6B54; --gold:#B8863B; --card:#FFFFFF; --line:#E8E0D0; }
   * { box-sizing: border-box; margin: 0; }
@@ -42,6 +44,9 @@
   .msg.system .body { display: inline-block; background: none; border: none; font-size: 12.5px; opacity: .6; padding: 2px; }
   .msg.verse .body { background: #FDF9EF; border-color: #EAD9B6; text-align: center; }
   .msg.verse .arabic { font-family: 'Amiri', 'Scheherazade New', 'Traditional Arabic', serif; font-size: 26px; line-height: 2; direction: rtl; color: #4A3B18; }
+  .ar { font-family: 'Amiri', 'Scheherazade New', 'Traditional Arabic', serif; font-size: 1.25em; color: #4A3B18; }
+  .msg .body em { color: #6B5B3E; }
+  .msg .body code { background: #F2EBDD; border-radius: 4px; padding: 0 4px; font-size: .92em; }
   .msg.verse .tr { font-size: 13.5px; opacity: .75; margin-top: 8px; }
   #thinking { display: none; font-size: 12.5px; opacity: .55; padding: 4px 18px; font-style: italic; }
   footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 18px; }
@@ -109,6 +114,14 @@ const SUPABASE_URL = 'https://ssknrqfaludyprjncdbx.supabase.co';
 const ANON = 'sb_publishable_NjBb7sd4_5ef5EtEiMNZnA__nmf_aoa';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// minimal markdown (bold/italic/code) + render Arabic script runs in the Amiri font
+function fmt(s) {
+  return esc(s)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/([؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿][؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿\s،؟٫٬]*)/g, '<span class="ar">$1</span>');
+}
 let session = null, roomId = null, since = 0, pollTimer = null, working = false, polling = false;
 const seen = new Set(); // rendered message ids — dedupes realtime + polls
 const optimistic = []; // texts we echoed locally before the server row exists
@@ -244,7 +257,7 @@ function render(m) {
     div.className = 'msg' + (m.kind === 'human' ? ' human' : '');
     div.innerHTML = '<div class="head" style="color:' + (m.color || (m.kind === 'human' ? '#0F6B54' : '#555')) + '">' + esc(m.speaker) +
       (m.role && m.role !== m.speaker && m.role !== 'human' ? ' <span class="role">· ' + esc(m.role) + '</span>' : '') +
-      '</div><div class="body">' + esc(m.text) + '</div>';
+      '</div><div class="body">' + fmt(m.text) + '</div>';
   }
   $('feed').appendChild(div);
 }

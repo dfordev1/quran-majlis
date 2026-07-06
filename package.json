@@ -2,5 +2,8 @@
   "name": "quran-majlis",
   "version": "1.0.0",
   "private": true,
-  "description": "Multi-model AI Quranic study circle — Vercel serverless + Supabase"
+  "description": "Multi-model AI Quranic study circle — Vercel serverless + Supabase",
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
 }

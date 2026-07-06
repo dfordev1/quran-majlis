@@ -116,10 +116,38 @@ async function getUser(req) {
   return { email: u.email, name: (u.user_metadata && u.user_metadata.name) || String(u.email || '').split('@')[0] };
 }
 
+// ---- writes go straight to Postgres with a private connection string (RLS locks
+// the public anon key to read-only; the postgres role is the table owner and bypasses it)
+const { Pool } = require('pg');
+let pool;
+function db() {
+  if (!pool) pool = new Pool({ connectionString: process.env.SUPABASE_DB_URL,
+    ssl: { rejectUnauthorized: false }, max: 1, idleTimeoutMillis: 10000 });
+  return pool;
+}
 async function addMsg(roomId, who, role, text, kind, color, model) {
-  const rows = await sb('POST', 'majlis_messages', {
-    room_id: roomId, session_id: 'room-' + roomId, speaker: who, role, text, kind, color: color || null, model: model || null });
-  return rows[0];
+  const r = await db().query(
+    'insert into majlis_messages (room_id, session_id, speaker, role, text, kind, color, model) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id, speaker, role, text, kind, color, at',
+    [roomId, 'room-' + roomId, who, role, text, kind, color || null, model || null]);
+  return { ...r.rows[0], id: Number(r.rows[0].id) }; // pg returns bigint as string
+}
+async function createRoom(topic, verse, createdBy, category) {
+  const r = await db().query(
+    'insert into majlis_rooms (topic, verse, created_by, category) values ($1,$2,$3,$4) returning *',
+    [topic, verse ? JSON.stringify(verse) : null, createdBy, category]);
+  return r.rows[0];
+}
+async function claimRoom(roomId, ms) { // atomic: exactly one heartbeat wins the round
+  const r = await db().query(
+    "update majlis_rooms set busy_until = now() + ($2 || ' milliseconds')::interval where id = $1 and busy_until < now() returning id",
+    [roomId, ms]);
+  return r.rows.length > 0;
+}
+async function touchRoom(roomId, ms) {
+  await db().query("update majlis_rooms set busy_until = now() + ($2 || ' milliseconds')::interval where id = $1", [roomId, ms]);
+}
+async function saveSummary(roomId, summary, upto) {
+  await db().query('update majlis_rooms set summary = $2, summary_upto = $3 where id = $1', [roomId, summary, upto]);
 }
 async function roomMessages(roomId, limit) {
   return sb('GET', 'majlis_messages?room_id=eq.' + roomId + '&order=id.desc&limit=' + (limit || 30)).then(r => r.reverse());
@@ -140,6 +168,8 @@ function verseBlock(room) {
   let out = '';
   if (room.category && CATEGORIES[room.category])
     out += 'This majlis is ' + CATEGORIES[room.category] + '.\n\n';
+  if (room.summary)
+    out += 'Summary of the sitting so far (older discussion not shown below):\n' + room.summary + '\n\n';
   if (room.verse && room.verse.length)
     out += 'Verse(s) under study:\n' + room.verse.map(v =>
       '[' + v.key + '] ' + v.arabic + '\nTranslation: ' + v.translation).join('\n') + '\n\n';
@@ -238,4 +268,5 @@ const cors = res => {
 };
 
 module.exports = { MODERATOR, SCHOLARS, GUESTS, ALL, byName, ADAB, memberSys,
-  sb, getUser, addMsg, roomMessages, transcriptOf, verseBlock, llm, fetchVerse, parseMentions, cors, KEYS };
+  sb, getUser, addMsg, createRoom, claimRoom, touchRoom, saveSummary,
+  roomMessages, transcriptOf, verseBlock, llm, fetchVerse, parseMentions, cors, KEYS };

@@ -20,9 +20,7 @@ module.exports = async (req, res) => {
     // Autonomous drive: any open browser heartbeats this endpoint with mode:'auto'.
     // An atomic claim on busy_until makes exactly ONE viewer drive each round.
     if (mode === 'auto' && !text) {
-      const claimed = await L.sb('PATCH', 'majlis_rooms?id=eq.' + room.id + '&busy_until=lt.' + encodeURIComponent(new Date().toISOString()),
-        { busy_until: new Date(Date.now() + 75000).toISOString() }, true);
-      if (!claimed || !claimed.length) return res.status(200).json({ queue: [] }); // another viewer is driving
+      if (!await L.claimRoom(room.id, 75000)) return res.status(200).json({ queue: [] }); // another viewer is driving
       // adab rest: after ~30 scholar turns with no human word, the circle pauses
       const recent = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&order=id.desc&limit=31&select=kind,speaker');
       const humanIdx = recent.findIndex(m => m.kind === 'human');
@@ -32,9 +30,21 @@ module.exports = async (req, res) => {
         return res.status(200).json({ queue: [], resting: true });
       }
     } else if (text) {
-      await L.sb('PATCH', 'majlis_rooms?id=eq.' + room.id, { busy_until: new Date(Date.now() + 75000).toISOString() }).catch(() => {});
+      await L.touchRoom(room.id, 75000).catch(() => {});
       await L.addMsg(room.id, user.name, 'human', text, 'human');
     }
+
+    // Running summary: every ~15 scholar messages, the moderator condenses the sitting
+    // so far into room.summary — every later speaker sees the WHOLE sitting cheaply.
+    try {
+      const newRows = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&id=gt.' + (room.summary_upto || 0) + '&kind=eq.scholar&order=id.asc&limit=40&select=id,speaker,role,text');
+      if (newRows.length >= 15) {
+        const upd = await L.llm(L.MODERATOR.model,
+          'You maintain the running minutes of a Quranic study circle. Merge the existing summary with the new contributions into ONE updated summary (max 250 words): key points made and by whom, agreements, respectful differences, open questions. Plain prose, no headings.',
+          [{ role: 'user', content: 'Existing summary:\n' + (room.summary || '(none yet)') + '\n\nNew contributions:\n' + L.transcriptOf(newRows) }]);
+        if (upd) { await L.saveSummary(room.id, upd, newRows[newRows.length - 1].id); room.summary = upd; }
+      }
+    } catch {}
 
     // Full circle: everyone who hasn't spoken in this room yet
     if (mode === 'roundtable') {

@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
       const category = ['quran', 'hadith', 'seerah', 'fiqh', 'aqidah', 'general'].includes((req.body || {}).category) ? req.body.category : 'quran';
       const refMatch = category === 'quran' && topic.match(/(\d{1,3}):(\d{1,3})(?:-(\d{1,3}))?/);
       const verse = refMatch ? await L.fetchVerse(refMatch[0]) : null;
-      const [room] = await L.sb('POST', 'majlis_rooms', { topic, verse, created_by: user.name, category });
+      const room = await L.createRoom(topic, verse, user.name, category);
       await L.addMsg(room.id, 'SYSTEM', 'system', '🕌 ' + user.name + ' convenes the majlis: "' + topic + '"', 'system');
       if (verse) for (const v of verse)
         await L.addMsg(room.id, 'QURAN', 'verse', v.arabic + '\n\n[' + v.key + '] ' + v.translation, 'verse');

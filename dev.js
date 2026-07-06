@@ -5,6 +5,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// load .env.local (gitignored) so dev matches the Vercel env
+try {
+  for (const line of fs.readFileSync(path.join(__dirname, '.env.local'), 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)=(?:"([^"]*)"|(.*))$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2] !== undefined ? m[2] : m[3];
+  }
+} catch {}
+
 const PORT = 3122;
 
 http.createServer(async (req, res) => {
