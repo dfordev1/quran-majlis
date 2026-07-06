@@ -199,7 +199,7 @@ function enterRoom(id, topic) {
   $('members').innerHTML = membersCache.map(m =>
     '<div class="member" style="border-left:3px solid ' + m.color + '" onclick="mention(\'' + m.name.replace(/'/g, "\\'") + '\')"><b>' +
     esc(m.name) + '</b> <span>' + esc(m.role === 'Guest' ? m.model : m.role) + '</span></div>').join('');
-  poll(); pollTimer = setInterval(poll, sbRT ? 10000 : 2000); // poll is only a fallback when realtime works
+  poll(); pollTimer = setInterval(() => { if (!document.hidden) poll(); }, sbRT ? 60000 : 2500); // realtime carries the room; poll is a rare safety net
 }
 function addMessage(m) {
   if (seen.has(m.id)) return;
@@ -209,6 +209,7 @@ function addMessage(m) {
     const i = optimistic.indexOf(m.text);
     if (i !== -1) { optimistic.splice(i, 1); return; }
   }
+  if (m.kind === 'human') resting = false; // any human voice (mine or another viewer's) wakes the circle
   const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
   render(m);
   lastMsgAt = Date.now();
@@ -262,6 +263,7 @@ function sayIt() {
   const t = $('sayInput').value.trim();
   if (!t) return;
   $('sayInput').value = '';
+  resting = false; // a human voice wakes the circle
   // optimistic echo: your message appears instantly, before the server round-trip
   optimistic.push(t);
   const box = $('feedbox');
@@ -272,14 +274,16 @@ function sayIt() {
 // ---------- autonomy: the circle drives itself ----------
 // Every open browser heartbeats; the server's atomic room lock lets exactly one
 // viewer trigger each round, so N viewers never multiply the discussion.
-let lastMsgAt = Date.now();
+let lastMsgAt = Date.now(), resting = false;
 async function heartbeat() {
-  if (!roomId || working) return;
-  if (Date.now() - lastMsgAt < 12000) return; // let the room breathe between turns
+  if (!roomId || working || resting || document.hidden) return; // no keys/invocations burned by resting rooms or background tabs
+  if (Date.now() - lastMsgAt < 15000) return; // let the room breathe between turns
   const d = await api('say', { method: 'POST', body: JSON.stringify({ room_id: roomId, mode: 'auto' }) }).catch(() => null);
+  if (d && d.resting) { resting = true; return; }
   if (d && d.queue && d.queue.length) await runQueue(d.queue);
 }
-setInterval(heartbeat, 8000);
+setInterval(heartbeat, 20000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { lastMsgAt = Date.now(); poll(); } });
 
 // ---------- boot ----------
 try { session = JSON.parse(localStorage.getItem('majlis_session')); } catch {}
