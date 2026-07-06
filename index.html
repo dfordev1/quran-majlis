@@ -104,13 +104,17 @@
   </footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://ssknrqfaludyprjncdbx.supabase.co';
 const ANON = 'sb_publishable_NjBb7sd4_5ef5EtEiMNZnA__nmf_aoa';
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 let session = null, roomId = null, since = 0, pollTimer = null, working = false, polling = false;
-const seen = new Set(); // rendered message ids — dedupes overlapping polls
+const seen = new Set(); // rendered message ids — dedupes realtime + polls
+const optimistic = []; // texts we echoed locally before the server row exists
+const sbRT = window.supabase ? window.supabase.createClient(SUPABASE_URL, ANON) : null;
+let rtChannel = null;
 
 // ---------- auth (Supabase REST, no SDK needed) ----------
 async function authFetch(path, body) {
@@ -159,8 +163,9 @@ function onAuthed() {
   $('signout').style.display = '';
   showLobby();
 }
+function leaveRealtime() { if (rtChannel && sbRT) { sbRT.removeChannel(rtChannel); rtChannel = null; } }
 async function showLobby() {
-  clearInterval(pollTimer); roomId = null;
+  clearInterval(pollTimer); leaveRealtime(); roomId = null;
   $('room').style.display = 'none'; $('topicline').textContent = '';
   $('lobby').style.display = 'block';
   const d = await api('rooms');
@@ -182,8 +187,13 @@ async function createRoom() {
 
 // ---------- room ----------
 function enterRoom(id, topic) {
-  clearInterval(pollTimer);
-  roomId = id; since = 0; seen.clear();
+  clearInterval(pollTimer); leaveRealtime();
+  roomId = id; since = 0; seen.clear(); optimistic.length = 0;
+  // realtime: Supabase pushes every INSERT for this room over a websocket (~100ms)
+  if (sbRT) rtChannel = sbRT.channel('room-' + id)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'majlis_messages', filter: 'room_id=eq.' + id },
+      p => { if (roomId === id) addMessage(p.new); })
+    .subscribe();
   $('lobby').style.display = 'none';
   $('room').style.display = 'flex';
   $('feed').innerHTML = '';
@@ -191,7 +201,19 @@ function enterRoom(id, topic) {
   $('members').innerHTML = membersCache.map(m =>
     '<div class="member" style="border-left:3px solid ' + m.color + '" onclick="mention(\'' + m.name.replace(/'/g, "\\'") + '\')"><b>' +
     esc(m.name) + '</b> <span>' + esc(m.role === 'Guest' ? m.model : m.role) + '</span></div>').join('');
-  poll(); pollTimer = setInterval(poll, 2000);
+  poll(); pollTimer = setInterval(poll, sbRT ? 10000 : 2000); // poll is only a fallback when realtime works
+}
+function addMessage(m) {
+  if (seen.has(m.id)) return;
+  seen.add(m.id); since = Math.max(since, m.id);
+  // swallow the server copy of a message we already echoed optimistically
+  if (m.kind === 'human' && m.speaker === displayName()) {
+    const i = optimistic.indexOf(m.text);
+    if (i !== -1) { optimistic.splice(i, 1); return; }
+  }
+  const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
+  render(m);
+  if (stick) box.scrollTop = box.scrollHeight;
 }
 function mention(name) { $('sayInput').value = ('@' + name + ' ' + $('sayInput').value).trimEnd() + ' '; $('sayInput').focus(); }
 function render(m) {
@@ -216,14 +238,7 @@ async function poll() {
   try {
     const d = await api('messages?room_id=' + room + '&since=' + since);
     if (room !== roomId) return; // user left the room while this request was in flight
-    const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
-    let added = false;
-    for (const m of (d.messages || [])) {
-      since = Math.max(since, m.id);
-      if (seen.has(m.id)) continue;
-      seen.add(m.id); render(m); added = true;
-    }
-    if (added && stick) box.scrollTop = box.scrollHeight;
+    for (const m of (d.messages || [])) addMessage(m);
   } catch {}
   finally { polling = false; }
 }
@@ -248,6 +263,11 @@ function sayIt() {
   const t = $('sayInput').value.trim();
   if (!t) return;
   $('sayInput').value = '';
+  // optimistic echo: your message appears instantly, before the server round-trip
+  optimistic.push(t);
+  const box = $('feedbox');
+  render({ speaker: displayName(), role: 'human', kind: 'human', text: t });
+  box.scrollTop = box.scrollHeight;
   runQueueFromSay(t);
 }
 function continueRound() { if (!working) runQueueFromSay(''); }
