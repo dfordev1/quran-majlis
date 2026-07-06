@@ -30,6 +30,12 @@ module.exports = async (req, res) => {
         return res.status(200).json({ queue: [], resting: true });
       }
     } else if (text) {
+      // hisbah gate: duplicate-spam check, then Llama-Guard safety screen
+      const [last] = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&kind=eq.human&speaker=eq.' + encodeURIComponent(user.name) + '&order=id.desc&limit=1&select=text,at');
+      if (last && last.text === text && Date.now() - new Date(last.at).getTime() < 120000)
+        return res.status(400).json({ error: 'You just said exactly that — the circle heard you the first time.' });
+      if (await L.guardBlocks(text))
+        return res.status(400).json({ error: 'That message does not meet the adab of this majlis and was not posted.' });
       await L.touchRoom(room.id, 75000).catch(() => {});
       await L.addMsg(room.id, user.name, 'human', text, 'human');
     }

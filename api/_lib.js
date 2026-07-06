@@ -77,6 +77,53 @@ const GUESTS = [
   style: style + '. You are a guest member of the majlis and speak only within your specialty.',
 }));
 const ALL = [MODERATOR, ...SCHOLARS, ...GUESTS];
+
+// ---- Hisbah (moderation) staff — models NOT in the discussion roster ----
+const GUARD_MODEL = 'meta/llama-guard-4-12b'; // purpose-built safety classifier
+// EVERY remaining capable chat model in the catalog serves on the review panel —
+// they audit scholar output in parallel: citations, fatwas, adab, leaked reasoning.
+// Vision-tuned models (llama-3.2-*-vision-instruct) were tested here and rejected:
+// on pure-text classification they degenerated to flagging nearly everything,
+// including the moderator's own adab-enforcing remarks, with "reasoning" that was
+// just the message quoted back. Only genuine text/chat models serve as reviewers.
+const REVIEWERS = [
+  'nvidia/llama-3.1-nemotron-51b-instruct',
+  'meta/llama-3.1-8b-instruct',
+  'meta/llama-3.2-3b-instruct',
+  'meta/llama2-70b',
+  'mistralai/mixtral-8x7b-instruct-v0.1',
+  'mistralai/mistral-7b-instruct-v0.3',
+  'nv-mistralai/mistral-nemo-12b-instruct',
+  'nvidia/mistral-nemo-minitron-8b-8k-instruct',
+  'nvidia/llama-3.1-nemotron-nano-8b-v1',
+  'microsoft/phi-4-multimodal-instruct',
+  'upstage/solar-10.7b-instruct',
+  'zyphra/zamba2-7b-instruct',
+  'google/gemma-3n-e4b-it',
+].map(m => ({ name: 'Reviewer ' + m.replace(/^[^/]+\//, ''), model: m })); // full slug — never collide
+// ONE chief oversees: aggregates the panel's verdicts and watches overall room health
+const CHIEF = { name: 'Al-Muhtasib', model: 'mistralai/mistral-large-2-instruct', role: 'Review Panel', color: '#8A6D00' };
+const MUHTASIB = CHIEF;
+
+// Llama-Guard screens an incoming human message; true = blocked.
+// Called bare (no system prompt, no streaming) — the endpoint applies the guard
+// template itself and replies "safe" or "unsafe\nS<category>".
+async function guardBlocks(text) {
+  try {
+    const key = nextKey();
+    if (!key) return false;
+    const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ model: GUARD_MODEL, max_tokens: 20,
+        messages: [{ role: 'user', content: text.slice(0, 2000) }] }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return false;
+    const out = (await r.json()).choices?.[0]?.message?.content || '';
+    return /^\s*unsafe/i.test(out);
+  } catch { return false; } // guard down → fail open, the review panel still watches
+}
 const byName = n => ALL.find(a => a.name.toLowerCase() === String(n).toLowerCase());
 
 const ADAB = 'Rules of this majlis (strict): ' +
@@ -149,6 +196,19 @@ async function touchRoom(roomId, ms) {
 async function saveSummary(roomId, summary, upto) {
   await db().query('update majlis_rooms set summary = $2, summary_upto = $3 where id = $1', [roomId, summary, upto]);
 }
+async function claimReview(roomId, ms) {
+  const r = await db().query(
+    "update majlis_rooms set review_busy_until = now() + ($2 || ' milliseconds')::interval where id = $1 and review_busy_until < now() returning reviewed_upto",
+    [roomId, ms]);
+  return r.rows.length ? Number(r.rows[0].reviewed_upto || 0) : null;
+}
+async function saveReviewed(roomId, upto) {
+  await db().query('update majlis_rooms set reviewed_upto = $2 where id = $1', [roomId, upto]);
+}
+async function addFlag(roomId, messageId, speaker, reviewer, problem, reason) {
+  await db().query('insert into majlis_flags (room_id, message_id, speaker, reviewer, problem, reason) values ($1,$2,$3,$4,$5,$6)',
+    [roomId, messageId, speaker, reviewer, problem, reason]);
+}
 async function roomMessages(roomId, limit) {
   return sb('GET', 'majlis_messages?room_id=eq.' + roomId + '&order=id.desc&limit=' + (limit || 30)).then(r => r.reverse());
 }
@@ -204,13 +264,32 @@ function nvChat(model, system, messages, key) {
   });
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Some free-tier models narrate their reasoning as plain prose with no <think> tags
+// ("We need to respond as X... Let's count words..."). Detect and salvage: if the
+// text contains this planning voice, keep only what follows the LAST plausible
+// "final draft" marker, or the last paragraph if no marker is found.
+const LEAK_RX = /\b(we need to (respond|answer|write)|let'?s (draft|count|craft)|word count|now count|draft:|final draft|as an? ai( language)? model)\b/i;
+function delintReply(text) {
+  if (!LEAK_RX.test(text)) return text;
+  const markers = [...text.matchAll(/\n(?:final(?: draft| version| answer)?|draft \d*)\s*:?\s*\n/gi)];
+  if (markers.length) {
+    const cut = text.slice(markers[markers.length - 1].index + markers[markers.length - 1][0].length).trim();
+    if (cut && !LEAK_RX.test(cut)) return cut.replace(/^["']|["']$/g, '');
+  }
+  // no clean marker: take the last paragraph that itself doesn't read like reasoning
+  const paras = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  for (let i = paras.length - 1; i >= 0; i--) if (!LEAK_RX.test(paras[i]) && paras[i].length > 40) return paras[i];
+  return null; // nothing salvageable — caller should treat this as a failed turn
+}
+
 async function llm(model, system, messages, json) {
   for (let tries = 0; tries < 4; tries++) {
     const key = nextKey();
     if (!key) return null;
     try {
       const text = await nvChat(model, system, messages, key);
-      if (!json) return text;
+      if (!json) return delintReply(text);
       const m = text.match(/\{[\s\S]*\}/);
       if (!m) return null;
       try { return JSON.parse(m[0]); } catch { return null; }
@@ -269,4 +348,5 @@ const cors = res => {
 
 module.exports = { MODERATOR, SCHOLARS, GUESTS, ALL, byName, ADAB, memberSys,
   sb, getUser, addMsg, createRoom, claimRoom, touchRoom, saveSummary,
+  REVIEWERS, MUHTASIB, CHIEF, guardBlocks, claimReview, saveReviewed, addFlag,
   roomMessages, transcriptOf, verseBlock, llm, fetchVerse, parseMentions, cors, KEYS };

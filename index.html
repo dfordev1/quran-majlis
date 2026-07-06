@@ -48,6 +48,8 @@
   .msg .body em { color: #6B5B3E; }
   .msg .body code { background: #F2EBDD; border-radius: 4px; padding: 0 4px; font-size: .92em; }
   .msg.verse .tr { font-size: 13.5px; opacity: .75; margin-top: 8px; }
+  .msg.mod .body { background: #FBF3DC; border-color: #E4CD8B; }
+  .msg.mod .head::before { content: '🛡️ '; }
   #thinking { display: none; font-size: 12.5px; opacity: .55; padding: 4px 18px; font-style: italic; }
   footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 18px; }
   footer .wrap { display: flex; gap: 8px; padding: 0; max-width: 824px; }
@@ -254,7 +256,7 @@ function render(m) {
     div.className = 'msg verse';
     div.innerHTML = '<div class="body"><div class="arabic">' + esc(ar) + '</div><div class="tr">' + esc(tr || '') + '</div></div>';
   } else {
-    div.className = 'msg' + (m.kind === 'human' ? ' human' : '');
+    div.className = 'msg' + (m.kind === 'human' ? ' human' : '') + (m.kind === 'mod' ? ' mod' : '');
     div.innerHTML = '<div class="head" style="color:' + (m.color || (m.kind === 'human' ? '#0F6B54' : '#555')) + '">' + esc(m.speaker) +
       (m.role && m.role !== m.speaker && m.role !== 'human' ? ' <span class="role">· ' + esc(m.role) + '</span>' : '') +
       '</div><div class="body">' + fmt(m.text) + '</div>';
@@ -274,6 +276,7 @@ async function poll() {
 }
 
 // ---------- discussion driving (client walks the queue, one /api/speak per member) ----------
+let lastReviewAt = 0;
 async function runQueue(queue) {
   working = true; $('thinking').style.display = 'block';
   try {
@@ -281,12 +284,24 @@ async function runQueue(queue) {
       await Promise.all(queue.slice(i, i + 3).map(n =>
         api('speak', { method: 'POST', body: JSON.stringify({ room_id: roomId, name: n }) }).catch(() => {})));
     await poll();
+    // hisbah: fire-and-forget review pass, at most every 3 minutes per viewer
+    if (Date.now() - lastReviewAt > 180000) {
+      lastReviewAt = Date.now();
+      api('review', { method: 'POST', body: JSON.stringify({ room_id: roomId }) }).catch(() => {});
+    }
   } finally { working = false; $('thinking').style.display = 'none'; }
 }
 async function runQueueFromSay(text, mode) {
   const d = await api('say', { method: 'POST', body: JSON.stringify({ room_id: roomId, text, mode }) });
   if (d.queue) await runQueue(d.queue);
-  else if (d.error) alert(d.error);
+  else if (d.error) {
+    // the optimistic echo was rejected — strike it out instead of leaving it standing
+    const i = optimistic.indexOf(text);
+    if (i !== -1) optimistic.splice(i, 1);
+    const mine = [...document.querySelectorAll('#feed .msg.human .body')].reverse().find(e => e.textContent === text);
+    if (mine) { mine.style.textDecoration = 'line-through'; mine.style.opacity = '.45'; }
+    alert(d.error);
+  }
 }
 function sayIt() {
   if (working) return;
