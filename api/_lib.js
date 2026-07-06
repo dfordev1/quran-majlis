@@ -128,10 +128,22 @@ function transcriptOf(rows) {
   return rows.filter(m => m.kind !== 'system')
     .map(m => m.speaker + (m.role && m.role !== m.speaker ? ' (' + m.role + ')' : '') + ': ' + m.text).join('\n\n');
 }
+const CATEGORIES = {
+  quran:  'a Quranic tafsir sitting — the verse(s) and their meanings are the center of the discussion',
+  hadith: 'a hadith study sitting. Begin from the hadith itself: cite it fully with its collection and number where known and its grading (sahih/hasan/da\'if per the scholars of hadith), then discuss the isnad, the narrators where notable, the fiqh and lessons of the matn, and related narrations. If unsure of exact wording or grading, SAY SO plainly',
+  seerah: 'a seerah sitting — the life of the Prophet ﷺ. Ground the discussion in the established sirah sources (Ibn Ishaq/Ibn Hisham, al-Waqidi with caution, authentic hadith), distinguish well-attested events from weak reports, and draw the lessons',
+  fiqh:   'a fiqh discussion. Present the range of positions across the madhahib with their evidences, distinguish consensus from difference, and always close with "consult a qualified local scholar" for anything applied',
+  aqidah: 'an aqidah study sitting. Stay with what the Quran and authentic Sunnah affirm, present the mainstream positions, avoid speculative digressions, and be extra careful to flag anything disputed',
+  general:'an open Islamic studies discussion — bring whatever your specialty offers to the topic',
+};
 function verseBlock(room) {
-  if (!room.verse || !room.verse.length) return '';
-  return 'Verse(s) under study:\n' + room.verse.map(v =>
-    '[' + v.key + '] ' + v.arabic + '\nTranslation: ' + v.translation).join('\n') + '\n\n';
+  let out = '';
+  if (room.category && CATEGORIES[room.category])
+    out += 'This majlis is ' + CATEGORIES[room.category] + '.\n\n';
+  if (room.verse && room.verse.length)
+    out += 'Verse(s) under study:\n' + room.verse.map(v =>
+      '[' + v.key + '] ' + v.arabic + '\nTranslation: ' + v.translation).join('\n') + '\n\n';
+  return out;
 }
 
 // ================= LLM =================

@@ -80,6 +80,7 @@
 <div id="lobby" class="screen" style="display:none">
   <div class="wrap">
     <h2>Open a new majlis</h2>
+    <div id="cats" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 2px"></div>
     <div class="newrow">
       <input id="topicInput" style="flex:1" placeholder="e.g.  2:255 — what makes Ayat al-Kursi so special?">
       <button id="openBtn" onclick="createRoom()">Convene</button>
@@ -154,7 +155,21 @@ async function api(path, opts = {}) {
 }
 
 // ---------- lobby ----------
-let membersCache = [];
+let membersCache = [], category = 'quran';
+const CATS = {
+  quran:   { label: '📖 Quran',   ph: 'e.g.  2:255 — what makes Ayat al-Kursi so special?' },
+  hadith:  { label: '📜 Hadith',  ph: 'e.g.  the hadith "Actions are by intentions" — meanings and fiqh' },
+  seerah:  { label: '🐪 Seerah',  ph: 'e.g.  the wisdom in the Treaty of Hudaybiyyah' },
+  fiqh:    { label: '⚖️ Fiqh',    ph: 'e.g.  how the madhahib differ on combining prayers while traveling' },
+  aqidah:  { label: '🕋 Aqidah',  ph: 'e.g.  the names of Allah — ar-Rahman vs ar-Rahim' },
+  general: { label: '🌙 General', ph: 'e.g.  how should a Muslim approach social media?' },
+};
+function drawCats() {
+  $('cats').innerHTML = Object.entries(CATS).map(([k, c]) =>
+    '<button class="alt" style="padding:6px 12px;font-size:12.5px' + (k === category ? ';background:var(--green);color:#fff' : '') +
+    '" onclick="setCat(\'' + k + '\')">' + c.label + '</button>').join('');
+}
+function setCat(k) { category = k; $('topicInput').placeholder = CATS[k].ph; drawCats(); }
 function onAuthed() {
   $('auth').style.display = 'none';
   $('whoami').textContent = displayName();
@@ -166,18 +181,20 @@ async function showLobby() {
   clearInterval(pollTimer); leaveRealtime(); roomId = null;
   $('room').style.display = 'none'; $('topicline').textContent = '';
   $('lobby').style.display = 'block';
+  drawCats();
   const d = await api('rooms');
   membersCache = d.members || membersCache;
   $('rooms').innerHTML = (d.rooms || []).map(r =>
     '<div class="roomcard" onclick="enterRoom(' + r.id + ',this.dataset.t)" data-t="' + esc(r.topic) + '">' +
-    '<div>' + esc(r.topic) + '</div><div class="meta">by ' + esc(r.created_by || '?') + ' · ' + new Date(r.at).toLocaleString() + '</div></div>').join('')
+    '<div>' + (CATS[r.category] ? CATS[r.category].label.split(' ')[0] + ' ' : '') + esc(r.topic) +
+    '</div><div class="meta">by ' + esc(r.created_by || '?') + ' · ' + new Date(r.at).toLocaleString() + '</div></div>').join('')
     || '<p style="opacity:.5">No circles yet — convene the first one.</p>';
 }
 async function createRoom() {
   const topic = $('topicInput').value.trim();
   if (!topic) return;
   $('openBtn').disabled = true;
-  const d = await api('rooms', { method: 'POST', body: JSON.stringify({ topic }) });
+  const d = await api('rooms', { method: 'POST', body: JSON.stringify({ topic, category }) });
   $('openBtn').disabled = false;
   if (d.room) { enterRoom(d.room.id, topic); runQueueFromSay(''); } // open with a first round
   else alert(d.error || 'failed');
