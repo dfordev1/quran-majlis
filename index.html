@@ -97,10 +97,8 @@
     <div class="wrap">
       <input id="sayInput" placeholder="Speak… use @Name, @guests, @core or @all to address members directly" onkeydown="if(event.key==='Enter')sayIt()">
       <button onclick="sayIt()">Say</button>
-      <button class="alt" onclick="continueRound()">Continue ↻</button>
-      <button class="alt" onclick="fullCircle()" title="Every member who hasn't spoken contributes once">Full circle ◎</button>
     </div>
-    <div class="hint wrap">Tip: click a member chip above to @mention them.</div>
+    <div class="hint wrap">The circle converses on its own — click a member chip to @mention someone.</div>
   </footer>
 </div>
 
@@ -213,6 +211,7 @@ function addMessage(m) {
   }
   const box = $('feedbox'), stick = box.scrollTop + box.clientHeight > box.scrollHeight - 80;
   render(m);
+  lastMsgAt = Date.now();
   if (stick) box.scrollTop = box.scrollHeight;
 }
 function mention(name) { $('sayInput').value = ('@' + name + ' ' + $('sayInput').value).trimEnd() + ' '; $('sayInput').focus(); }
@@ -270,8 +269,17 @@ function sayIt() {
   box.scrollTop = box.scrollHeight;
   runQueueFromSay(t);
 }
-function continueRound() { if (!working) runQueueFromSay(''); }
-function fullCircle() { if (!working && confirm('Every member who has not yet spoken will contribute once. This takes a few minutes. Proceed?')) runQueueFromSay('', 'roundtable'); }
+// ---------- autonomy: the circle drives itself ----------
+// Every open browser heartbeats; the server's atomic room lock lets exactly one
+// viewer trigger each round, so N viewers never multiply the discussion.
+let lastMsgAt = Date.now();
+async function heartbeat() {
+  if (!roomId || working) return;
+  if (Date.now() - lastMsgAt < 12000) return; // let the room breathe between turns
+  const d = await api('say', { method: 'POST', body: JSON.stringify({ room_id: roomId, mode: 'auto' }) }).catch(() => null);
+  if (d && d.queue && d.queue.length) await runQueue(d.queue);
+}
+setInterval(heartbeat, 8000);
 
 // ---------- boot ----------
 try { session = JSON.parse(localStorage.getItem('majlis_session')); } catch {}

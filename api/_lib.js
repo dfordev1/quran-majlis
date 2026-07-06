@@ -96,15 +96,16 @@ function memberSys(a, humanNames) {
 }
 
 // ================= SUPABASE REST =================
-async function sb(method, pathq, body) {
+async function sb(method, pathq, body, wantRows) {
+  const rep = method === 'POST' || method === 'GET' || wantRows;
   const r = await fetch(SUPABASE_URL + '/rest/v1/' + pathq, {
     method,
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY,
-      Authorization: 'Bearer ' + SUPABASE_KEY, Prefer: method === 'POST' ? 'return=representation' : 'return=minimal' },
+      Authorization: 'Bearer ' + SUPABASE_KEY, Prefer: rep ? 'return=representation' : 'return=minimal' },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) throw new Error('supabase ' + r.status + ': ' + (await r.text()).slice(0, 200));
-  return method === 'POST' || method === 'GET' ? r.json() : null;
+  return rep ? r.json() : null;
 }
 async function getUser(req) {
   const token = String(req.headers.authorization || '').replace(/^Bearer /, '');

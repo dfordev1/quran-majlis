@@ -17,7 +17,24 @@ module.exports = async (req, res) => {
     const [room] = await L.sb('GET', 'majlis_rooms?id=eq.' + Number(room_id));
     if (!room) return res.status(404).json({ error: 'room not found' });
 
-    if (text) await L.addMsg(room.id, user.name, 'human', text, 'human');
+    // Autonomous drive: any open browser heartbeats this endpoint with mode:'auto'.
+    // An atomic claim on busy_until makes exactly ONE viewer drive each round.
+    if (mode === 'auto' && !text) {
+      const claimed = await L.sb('PATCH', 'majlis_rooms?id=eq.' + room.id + '&busy_until=lt.' + encodeURIComponent(new Date().toISOString()),
+        { busy_until: new Date(Date.now() + 75000).toISOString() }, true);
+      if (!claimed || !claimed.length) return res.status(200).json({ queue: [] }); // another viewer is driving
+      // adab rest: after ~30 scholar turns with no human word, the circle pauses
+      const recent = await L.sb('GET', 'majlis_messages?room_id=eq.' + room.id + '&order=id.desc&limit=31&select=kind,speaker');
+      const humanIdx = recent.findIndex(m => m.kind === 'human');
+      if (humanIdx === -1 && recent.filter(m => m.kind === 'scholar').length >= 30) {
+        if (recent[0] && recent[0].speaker !== 'SYSTEM')
+          await L.addMsg(room.id, 'SYSTEM', 'system', '🌙 The circle rests, awaiting your voice — say anything to resume.', 'system');
+        return res.status(200).json({ queue: [], resting: true });
+      }
+    } else if (text) {
+      await L.sb('PATCH', 'majlis_rooms?id=eq.' + room.id, { busy_until: new Date(Date.now() + 75000).toISOString() }).catch(() => {});
+      await L.addMsg(room.id, user.name, 'human', text, 'human');
+    }
 
     // Full circle: everyone who hasn't spoken in this room yet
     if (mode === 'roundtable') {
